@@ -63,7 +63,6 @@ parser.on('data', data =>{
             send_mess += "部屋はとても暗いです。";
         }
         send_mess += " (RawData : " + Bright + ")\n";
-        send_mess += "-------------------------------------";
         _display = false;
     }
     if(_display_info){
@@ -71,6 +70,7 @@ parser.on('data', data =>{
             client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send(send_mess);
         }
         if(!_display){
+            client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send("-------------------------------------");
             _display_info = false;
         }
     }
@@ -86,11 +86,45 @@ function writeToArduino(data, deleteTimer_command) {
     });
 
     if(deleteTimer_command != "not_Timer"){
-        deleteTimer(deleteTimer_command);
+        deleteTimer_Com(deleteTimer_command);
     }
 }
+function clearTimer_Num(deleteTimer_number){
+    if(setTimerObj[deleteTimer_number] == null){
+        client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send("指定された予約は存在しません");
+        return;
+    }
+    clearTimeout(setTimerObj[deleteTimer_number]);
+    setTimerObj.splice(deleteTimer_number,1);
+    setTimerObj[setTimerObj.length] = null;
+    try {
+        var setTimer_file = fs.readFileSync("setTimer.txt", 'utf8');
+    } catch (error) {
+        console.log(error);
+        return;
+    }
+    var setTimer_data = setTimer_file.toString().split('\n');
+    var writeLine = "";
+    var writeCount = 0;
+    for(var i=0; i<setTimer_data.length - 1;i++){
+        if(i != deleteTimer_number){
+            writeLine += writeCount + ","+ setTimer_data[i].split(',')[1] +","+ setTimer_data[i].split(',')[2] +","+ setTimer_data[i].split(',')[3] + "\n";
+            writeCount ++;
+        }
+    }
+    try {
+        fs.writeFileSync("setTimer.txt", writeLine);
+    } catch (error) {
+        console.log(error);
+        return;
+    }
+    client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send("予約を消去しました");
+    sendSetTimer();
+    console.log('予約消去完了');
+    setCount -= 1;
+}
 
-function deleteTimer(deleteTimer_command){
+function deleteTimer_Com(deleteTimer_command){
     try {
         var setTimer_file = fs.readFileSync("setTimer.txt", 'utf8');
     } catch (error) {
@@ -225,7 +259,16 @@ client.on("message",async message => {
                 message.reply("Usage:  /clear [Timer Number]");
                 break;
             }
-            clearTimeout(setTimerObj[Number(argument_2)]);
+            if(setCount == 0){
+                message.reply("現在予約はありません");
+                break;
+            }
+            var Timer_num = Number(argument_2);
+            if(Timer_num < 0 || Timer_num > (setCount-1)){
+                message.reply("そのような予約はありません");
+                break;
+            }
+            clearTimer_Num(Timer_num);
             break;
         case COMMAND_PREFIX+"set":
         case COMMAND_PREFIX+"send":
