@@ -29,41 +29,46 @@ const parser = port.pipe(new Readline({ delimiter: '\n' }));
 var _display_info = false;
 var _display = false;
 
+var max_setCount = 50;
+var setCount = 0;
+var setTimerObj = new Array(max_setCount).fill(null);
+
 port.on('open', function () {
     console.log('Serial open.');
-    setInterval(writeToArduino, 10000, 'GET_INFO\n');
+    setInterval(writeToArduino, 10000, 'GET_INFO\n', "not_Timer");
 });
 
 parser.on('data', data =>{
     console.log('from arduino:', data);
-    var sendmess = "";
+    var send_mess = "";
     if(data.indexOf("Temperature : ") != -1){
         var Temp = parseFloat(data.substr(14).slice(0,-2));
-        sendmess += "温度 : "+ Temp +" [℃]";
+        send_mess += "温度 : "+ Temp +" [℃]";
     }else if(data.indexOf("Humidity : ") != -1){
         var Humid = parseFloat(data.substr(11).slice(0,-2));
-        sendmess += "湿度 : "+ Humid +" [%]";
+        send_mess += "湿度 : "+ Humid +" [%]";
     }else if(data.indexOf("Brightness : ") != -1){
         var Bright = Number(data.substr(13).slice(0,-1));
         if(Bright <= 700){
-            sendmess += "部屋はとても明るいです。";
+            send_mess += "部屋はとても明るいです。";
         }else if(Bright <= 800){
-            sendmess += "部屋は明るいです。";
+            send_mess += "部屋は明るいです。";
         }else if(Bright <= 850){
-            sendmess += "部屋は少し明るいです。";
+            send_mess += "部屋は少し明るいです。";
         }else if(Bright <= 900){
-            sendmess += "部屋は少し暗いです。";
+            send_mess += "部屋は少し暗いです。";
         }else if(Bright <= 950){
-            sendmess += "部屋は暗いです。";
+            send_mess += "部屋は暗いです。";
         }else if(Bright <= 1024){
-            sendmess += "部屋はとても暗いです。";
+            send_mess += "部屋はとても暗いです。";
         }
-        sendmess += " (RawData : " + Bright + ")";
+        send_mess += " (RawData : " + Bright + ")\n";
+        send_mess += "-------------------------------------";
         _display = false;
     }
     if(_display_info){
-        if(sendmess != ""){
-            client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send(sendmess);
+        if(send_mess != ""){
+            client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send(send_mess);
         }
         if(!_display){
             _display_info = false;
@@ -71,7 +76,7 @@ parser.on('data', data =>{
     }
 });
 
-function writeToArduino(data) {
+function writeToArduino(data, deleteTimer_command) {
     console.log('Write: ' + data);
     port.write(data, function(err, results) {
       if(err) {
@@ -79,6 +84,61 @@ function writeToArduino(data) {
         console.log('Results: ' + results);
       }
     });
+
+    if(deleteTimer_command != "not_Timer"){
+        deleteTimer(deleteTimer_command);
+    }
+}
+
+function deleteTimer(deleteTimer_command){
+    try {
+        var setTimer_file = fs.readFileSync("setTimer.txt", 'utf8');
+    } catch (error) {
+        console.log(error);
+        return;
+    }
+    var setTimer_data = setTimer_file.toString().split('\n');
+    var writeLine = "";
+    var writeCount = 0;
+    for(var i=0; i<setTimer_data.length - 1;i++){
+        if(setTimer_data[i].split(',')[2] == deleteTimer_command){
+            setTimerObj.splice(i,1);
+            setTimerObj[setTimerObj.length] = null;
+        }else{
+            writeLine += writeCount + ","+ setTimer_data[i].split(',')[1] +","+ setTimer_data[i].split(',')[2] +","+ setTimer_data[i].split(',')[3] + "\n";
+            writeCount ++;
+        }
+    }
+    try {
+        fs.writeFileSync("setTimer.txt", writeLine);
+    } catch (error) {
+        console.log(error);
+        return;
+    }
+    client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send("予約 " + deleteTimer_command+" を実行しました");
+    sendSetTimer();
+    console.log('予約消去完了');
+    setCount -= 1;
+}
+
+function sendSetTimer(){
+    try {
+        var setTimer_file = fs.readFileSync("setTimer.txt", 'utf8');
+    } catch (error) {
+        console.log(error);
+        return;
+    }
+    var setTimer_data = setTimer_file.toString().split('\n');
+    if(setTimer_data.length == 1){
+        client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send("現在予約はありません");
+        return;
+    }
+    var send_mess = "現在の予約は以下のようになっています\n";
+    for(var i=0; i<setTimer_data.length-1;i++){
+        send_mess += "[" +i+"]\n" + new Date(Number(setTimer_data[i].split(',')[1])) +"\n"+ setTimer_data[i].split(' ')[1] +" "+ setTimer_data[i].split(' ')[2] + "\n";
+    }
+    send_mess += "-------------------------------------";
+    client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send(send_mess);
 }
 
 var opts = {
@@ -109,6 +169,7 @@ client.on("message",async message => {
     var argument_2 = receivemessage[1];
     var argument_3 = receivemessage[2];
     var argument_4 = receivemessage[3];
+    var argument_5 = receivemessage[4];
     var send_command = "";
     var _set_timer = false;
     var set_time = 0;
@@ -151,10 +212,20 @@ client.on("message",async message => {
                         client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send(attachment);
                     } );
                     break;
+                case "Timer":
+                    sendSetTimer();
+                    break;
                 default:
                     message.reply("そのようなコマンドはありません");
                     break;
             }
+            break;
+        case COMMAND_PREFIX+"clear":
+            if(argument_2 == null){
+                message.reply("Usage:  /clear [Timer Number]");
+                break;
+            }
+            clearTimeout(setTimerObj[Number(argument_2)]);
             break;
         case COMMAND_PREFIX+"set":
         case COMMAND_PREFIX+"send":
@@ -163,12 +234,22 @@ client.on("message",async message => {
                     message.reply("Usage:  /set [Target] [Command] [Time(m)]");
                     break;
                 }
-                set_time = Number(argument_4);
+                if(argument_2 == "Webcam" && argument_3 == "Target"){
+                    if(argument_5 == null){
+                        message.reply("Usage:  /set Webcam Target [degree] [Time(m)]");
+                        break;
+                    }else{
+                        set_time = Number(argument_5);
+                    }
+                }else{
+                    set_time = Number(argument_4);
+                }
                 if(set_time > 0 && set_time <= 600){
                     _set_timer = true;
-                    set_time = set_time * 60*1000;
+                    set_time = set_time /* *60 */*1000;
                 }else{
                     message.reply("Timerの指定時間は0～600分以内です");
+                    break;
                 }
             }else if(receivecommand == (COMMAND_PREFIX+"send")){
                 if(argument_2 == null || argument_3 == null){
@@ -277,16 +358,27 @@ client.on("message",async message => {
         default:
             break;
     }
+
     if(send_command != ""){
         if(_set_timer){
-            setTimeout(writeToArduino, set_time, send_command);
-            message.reply("予約完了\n" + (set_time/60000)+ "分後, "+ argument_2 + ", "+ argument_3);
+            setTimerObj[setCount] = setTimeout(writeToArduino, set_time, send_command, message.content.replace(/　/g," "));
+            var setDate = Date.now()+Number(set_time);
+            try {
+                fs.appendFileSync('setTimer.txt', setCount + ","+ (setDate) +","+ message.content.replace(/　/g," ") +","+ send_command);
+            } catch (error) {
+                console.log(error);
+                return;
+            }
+            message.reply("予約完了\n" + new Date(setDate)+ ", "+ argument_2 + ", "+ argument_3);
+            _set_timer = false;
+            setCount++;
         }else{
-            writeToArduino(send_command);
+            writeToArduino(send_command, "not_Timer");
         }
     }
 
     if(!message.author.bot){
         console.log("-------------------------------------");
+        client.channels.cache.get(COM_RECEIVE_CHANNEL_ID).send("-------------------------------------");
     }
 });
