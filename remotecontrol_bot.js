@@ -9,6 +9,7 @@ const proc = require('child_process');
 const fetch = require('node-fetch');
 const Canvas = require('canvas');
 const { Console } = require('console');
+const { hasUncaughtExceptionCaptureCallback } = require('process');
 
 const COMMAND_PREFIX = "/"
 var server;
@@ -26,7 +27,7 @@ COM_RECEIVE_CHANNEL_ID = token_file.toString().split('\r\n')[5];
 var _display_info = false;
 var _display = false;
 
-var max_setCount = 10;
+var max_setCount = 50;
 var setCount = 0;
 var setTimerObj = new Array(max_setCount).fill(null);
 
@@ -68,8 +69,8 @@ port.on('open', function (err) {
         return;
     }
     console.log('Serial open.');
-    setTimeout(sendToDiscord, 2000, "Arduinoとの通信を開始しました。");
-    intervalObj = setInterval(writeToArduino, 600000, 'GET_INFO\n', "not_Timer");
+    setTimeout(sendToDiscord, 3000, "Arduinoとの通信を開始しました。");
+    intervalObj = setInterval(writeToArduino, 10000, 'GET_INFO\n', "not_Timer");
 });
 
 function portOpen(){
@@ -77,6 +78,7 @@ function portOpen(){
         if(err){
             console.log(err);
             setTimeout(sendToDiscord, 2000, "[ErrorCode : 03]\nArduinoとの通信復帰に失敗しました。");
+            return;
         }
         setTimeout(sendToDiscord, 2000, "Arduinoとの通信復帰成功。");
     });
@@ -300,7 +302,7 @@ client.on("ready", ()=> {
     if(writeCount == 0){
         return;
     }
-    sendToDiscord("起動前に予約されていた予約をセットしました\n");
+    sendToDiscord("サーバ再起動\n起動前に予約されていた予約をセットしました\n");
     sendSetTimer();
 });
 
@@ -329,6 +331,11 @@ client.on("message",async message => {
     console.log(message.author.username+" (id : "+message.id+")");
 
     switch(receivecommand){
+        case COMMAND_PREFIX+"error":
+            setTimeout(() => {
+                throw new Error('test error');
+            });
+            break;
         case COMMAND_PREFIX+"ip":
             var getURL = "https://checkip.amazonaws.com";
             fetch(getURL)
